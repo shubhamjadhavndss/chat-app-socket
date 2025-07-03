@@ -17,6 +17,7 @@ const App = () => {
   const [credentials, setCredentials] = useState({ username: '', email: '', password: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [authError, setAuthError] = useState('');
 
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -41,12 +42,34 @@ const App = () => {
     scrollToBottom();
   }, [messages]);
 
+  const clearAuthData = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+    setSocket(null);
+    setUsers([]);
+    setMessages([]);
+    setSelectedUser(null);
+    setOnlineUsers([]);
+    setAuthError('');
+  };
+
   const initializeSocket = (token) => {
+    if (socket) {
+      socket.disconnect();
+    }
+
     const newSocket = io('http://localhost:5000');
 
     newSocket.on('connect', () => {
       console.log('Connected to server');
       newSocket.emit('join', { token });
+    });
+
+    newSocket.on('authError', (error) => {
+      console.error('Authentication error:', error);
+      setAuthError(error);
+      clearAuthData();
     });
 
     newSocket.on('newMessage', (message) => {
@@ -102,6 +125,13 @@ const App = () => {
       const response = await fetch('http://localhost:5000/api/users', {
         headers: { Authorization: `Bearer ${token}` }
       });
+
+      if (response.status === 401) {
+        setAuthError('Session expired. Please login again.');
+        clearAuthData();
+        return;
+      }
+
       const data = await response.json();
       setUsers(data);
     } catch (error) {
@@ -115,6 +145,13 @@ const App = () => {
       const response = await fetch(`http://localhost:5000/api/messages/${userId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+
+      if (response.status === 401) {
+        setAuthError('Session expired. Please login again.');
+        clearAuthData();
+        return;
+      }
+
       const data = await response.json();
       setMessages(data);
     } catch (error) {
@@ -125,6 +162,7 @@ const App = () => {
   const handleAuth = async () => {
     setLoading(true);
     setError('');
+    setAuthError('');
 
     try {
       const endpoint = isLogin ? '/api/login' : '/api/register';
@@ -140,6 +178,7 @@ const App = () => {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
         setUser(data.user);
+        setCredentials({ username: '', email: '', password: '' });
         initializeSocket(data.token);
       } else {
         setError(data.error);
@@ -201,17 +240,12 @@ const App = () => {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
     if (socket) {
       socket.disconnect();
     }
-    setUser(null);
-    setSocket(null);
-    setUsers([]);
-    setMessages([]);
-    setSelectedUser(null);
+    clearAuthData();
     setCredentials({ username: '', email: '', password: '' });
+    setError('');
   };
 
   const formatTime = (timestamp) => {
@@ -235,6 +269,12 @@ const App = () => {
           <h2 className="text-2xl font-bold text-center mb-6">
             {isLogin ? 'Login' : 'Register'}
           </h2>
+
+          {authError && (
+            <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mb-4">
+              {authError}
+            </div>
+          )}
 
           {error && (
             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
@@ -288,7 +328,11 @@ const App = () => {
           <p className="text-center mt-4">
             {isLogin ? "Don't have an account?" : "Already have an account?"}
             <button
-              onClick={() => setIsLogin(!isLogin)}
+              onClick={() => {
+                setIsLogin(!isLogin);
+                setError('');
+                setAuthError('');
+              }}
               className="text-blue-500 hover:underline ml-1"
             >
               {isLogin ? 'Register' : 'Login'}
@@ -395,8 +439,8 @@ const App = () => {
                 >
                   <div
                     className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${message.sender._id === user.id
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-gray-200 text-gray-800'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-200 text-gray-800'
                       }`}
                   >
                     <div className="break-words">{message.content}</div>
